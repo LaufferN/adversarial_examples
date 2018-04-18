@@ -10,6 +10,8 @@ from PIL import Image
 
 import pickle
 
+
+
 def main():
 
     # hyperparameters
@@ -76,7 +78,6 @@ def main():
 
     tf_prediction = 0 # used to check correct behavior
 
-
     # start the session
     with tf.Session() as sess:
         # initialize the variables
@@ -97,82 +98,26 @@ def main():
         print("\nTraining complete!")
         print(sess.run(accuracy, feed_dict={x_input: test_images, y: test_labels}))
 
+
+        init_imgs = [mnist.test.images[3], mnist.test.images[2], mnist.test.images[1], mnist.test.images[18], mnist.test.images[4], mnist.test.images[8], mnist.test.images[11], mnist.test.images[0], mnist.test.images[61], mnist.test.images[9]]
+
+        # save session
+        saver = tf.train.Saver()
+        saver.save(sess, 'temp/adv_model',global_step=1000)
+
+        restorer = tf.train.import_meta_graph('temp/adv_model.meta')
+
         ############# generate adversary ##############
 
-        # setup new adversarial network
+        sum_ = 0
+        for init_img in init_img:
+            for target in range(0):
+                new_sess = tf.Session()
+                restorer.restore(new_sess, tf.train.latest_checkpoint('./'))
+                adv = gen_adv(init_img, target, new_sess)
 
-        x_input = tf.Variable(tf.zeros([1,784]))
-        # now declare the output data placeholder - 10 digits
-        y = tf.placeholder(tf.float32, [None, 10])
-
-        # calculate the output of the hidden layer
-        hidden_1 = tf.add(tf.matmul(x_input, w1), b1)
-        hidden_1 = tf.nn.relu(hidden_1)
-
-        hidden_out = tf.add(tf.matmul(hidden_1, w2), b2)
-        hidden_out = tf.nn.relu(hidden_out)
-
-        # hidden_out = tf.add(tf.matmul(hidden_2, w3), b3)
-        # hidden_out = tf.nn.relu(hidden_out)
-
-        # calculate the hidden layer output - in this case, let's use a softmax activated
-        # output layer
-        y_ = tf.nn.softmax(tf.add(tf.matmul(hidden_out, w3), b3))
-
-        # now let's define the cost function which we are going to train the model on
-        y_clipped = tf.clip_by_value(y_, 1e-10, 0.9999999)
-
-        img = mnist.test.images[0]
-
-        # trainable_image = tf.Variable(tf.zeros(784))
-        x = tf.placeholder(tf.float32, [1,784])
-        x_hat = x_input # our trainable adversarial input
-        assign_op = tf.assign(x_hat, x)
-
-        learning_rate = tf.placeholder(tf.float32, ())
-        y_hat = tf.placeholder(tf.int32, ())
-
-        adversarial_label = tf.one_hot(y_hat, 10)
-        # loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=[labels])
-        adversarial_loss  = -tf.reduce_mean(tf.reduce_sum(adversarial_label * tf.log(y_clipped)
-                                                  + (1 - adversarial_label) * tf.log(1 - y_clipped), axis=1))
-        optim_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(adversarial_loss, var_list=[x_hat])
-
-        epsilon = tf.placeholder(tf.float32, ())
-
-        below = x - epsilon
-        above = x + epsilon
-        projected = tf.clip_by_value(tf.clip_by_value(x_hat, below, above), 0, 1)
-        with tf.control_dependencies([projected]):
-                project_step = tf.assign(x_hat, projected)
-
-        # var_grad = tf.gradients(adversarial_loss, [x_input])
-        # grad = sess.run(var_grad, feed_dict={x_input: [img], y_hat: 2})[0][0]
-        # epsilon = 10.0/255.0
-        # adv = np.add(img, -1 * grad * epsilon)
-
-        demo_epsilon = 255.0/255.0 # perturbation size
-        demo_lr = 1e-1
-        # demo_lr = .5
-        demo_steps = 1000
-        demo_target = 2
-
-        # initialization step
-        sess.run(assign_op, feed_dict={x: [img]})
-
-        # projected gradient descent
-        for i in range(demo_steps):
-            # gradient descent step
-            _, loss_value = sess.run(
-                [optim_step, adversarial_loss],
-                feed_dict={learning_rate: demo_lr, y_hat: demo_target})
-            # project step
-            sess.run(project_step, feed_dict={x: [img], epsilon: demo_epsilon})
-            if (i+1) % 10 == 0:
-                print('step %d, loss=%g' % (i+1, loss_value))
-
-
-        adv = x_hat.eval()[0] # retrieve the adversarial example
+                adv_pert_size = np.linalg.norm(adv-init_img)
+                sum_ += adv_pert_size
 
         np.savetxt('adv_example_vector', adv)
 
@@ -188,6 +133,87 @@ def main():
         img_adv.save("adv_image.png")
 
 
+def gen_adv(init_img, target, sess):
+
+    # setup new adversarial network
+
+    x_input = tf.Variable(tf.zeros([1,784]))
+    # now declare the output data placeholder - 10 digits
+    y = tf.placeholder(tf.float32, [None, 10])
+
+    # calculate the output of the hidden layer
+    hidden_1 = tf.add(tf.matmul(x_input, w1), b1)
+    hidden_1 = tf.nn.relu(hidden_1)
+
+    hidden_out = tf.add(tf.matmul(hidden_1, w2), b2)
+    hidden_out = tf.nn.relu(hidden_out)
+
+    # hidden_out = tf.add(tf.matmul(hidden_2, w3), b3)
+    # hidden_out = tf.nn.relu(hidden_out)
+
+    # calculate the hidden layer output - in this case, let's use a softmax activated
+    # output layer
+    y_ = tf.nn.softmax(tf.add(tf.matmul(hidden_out, w3), b3))
+
+    # now let's define the cost function which we are going to train the model on
+    y_clipped = tf.clip_by_value(y_, 1e-10, 0.9999999)
+
+    img = mnist.test.images[0]
+
+    # trainable_image = tf.Variable(tf.zeros(784))
+    x = tf.placeholder(tf.float32, [1,784])
+    x_hat = x_input # our trainable adversarial input
+    assign_op = tf.assign(x_hat, x)
+
+    learning_rate = tf.placeholder(tf.float32, ())
+    y_hat = tf.placeholder(tf.int32, ())
+
+    adversarial_label = tf.one_hot(y_hat, 10)
+    # loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=[labels])
+    adversarial_loss  = -tf.reduce_mean(tf.reduce_sum(adversarial_label * tf.log(y_clipped)
+                                              + (1 - adversarial_label) * tf.log(1 - y_clipped), axis=1))
+    optim_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(adversarial_loss, var_list=[x_hat])
+
+    epsilon = tf.placeholder(tf.float32, ())
+
+    below = x - epsilon
+    above = x + epsilon
+    projected = tf.clip_by_value(tf.clip_by_value(x_hat, below, above), 0, 1)
+    with tf.control_dependencies([projected]):
+            project_step = tf.assign(x_hat, projected)
+
+    # var_grad = tf.gradients(adversarial_loss, [x_input])
+    # grad = sess.run(var_grad, feed_dict={x_input: [img], y_hat: 2})[0][0]
+    # epsilon = 10.0/255.0
+    # adv = np.add(img, -1 * grad * epsilon)
+
+    adv_epsilon = 255.0/255.0 # perturbation size
+    adv_lr = 1e-3
+    # adv_lr = .5
+    adv_steps = 1000
+    adv_target = 2
+
+    # initialization step
+    sess.run(assign_op, feed_dict={x: [img]})
+
+    # projected gradient descent
+    for i in range(adv_steps):
+        # gradient descent step
+        _, loss_value = sess.run(
+            [optim_step, adversarial_loss],
+            feed_dict={learning_rate: adv_lr, y_hat: adv_target})
+        # project step
+        sess.run(project_step, feed_dict={x: [img], epsilon: adv_epsilon})
+        if (i+1) % 10 == 0:
+            print('step %d, loss=%g' % (i+1, loss_value))
+
+        adv = x_hat.eval()[0] # retrieve the adversarial example
+        guess = y_.eval(feed_dict={x_input: [adv]})
+        if np.argmax(guess) == adv_target:
+            break
+
+
+    return x_hat.eval()[0] # retrieve the adversarial example
 
 
 
